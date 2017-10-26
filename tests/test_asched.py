@@ -30,7 +30,10 @@ def test_periodic_task(capfd):
     task = sched.every('2s', repeat=2)
     task.run(periodic_task_1, 'periodic_task')
 
-    run(asyncio.sleep(4.5))
+    run(asyncio.sleep(1.5))
+    assert sched.next_task_scheduled() == task
+
+    run(asyncio.sleep(3))
     out, err = capfd.readouterr()
     assert out.count('periodic_task') == 2
 
@@ -50,10 +53,7 @@ def test_multiple_periodic_tasks(capfd):
     task_2 = sched.every('1s', repeat=3)
     task_2.run(periodic_task_2, 'periodic_task_2')
 
-    run(asyncio.sleep(1.5))
-    assert sched.next_task_scheduled() == task_1
-
-    run(asyncio.sleep(3))
+    run(asyncio.sleep(4.5))
     out, err = capfd.readouterr()
     assert out.count('periodic_task_1') == 2
     assert out.count('periodic_task_2') == 3

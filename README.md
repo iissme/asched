@@ -1,4 +1,6 @@
 # asched
+[![Build Status](https://travis-ci.org/isanich/asched.svg?branch=master)](https://travis-ci.org/isanich/asched)
+[![Coverage Status](https://coveralls.io/repos/github/isanich/asched/badge.svg?branch=master)](https://coveralls.io/github/isanich/asched?branch=master)
 
 Python 3.6+
 
