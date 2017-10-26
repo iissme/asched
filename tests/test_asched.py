@@ -78,23 +78,6 @@ sched = AsyncShed(loop, conector=MongoConnector.create(db_name='test_db'))
 run(sched._db_connector.col.remove())
 run(asyncio.sleep(2))
 loop.create_task(sched.run())
-# loop.create_task(sched.run())
-# task0 = sched.every('2s', repeat=5, max_failures=5)
-# task0.run(periodic_task, 555)
-# loop.run_until_complete(asyncio.sleep(6))
-# task0.run(repeat22, 666)
-# task1 = sched.every('2s', max_failures=2).run(periodic_task, 11)
-# task2 = sched.every('2s', repeat=2).run(repeat22, 22)
-# task4 = sched.once().at('20:34').run(repeat22, 22222222)
-# task5 = sched.once().at(datetime(year=2017, month=5, day=24, hour=20)).run(test_res, 44)
-# task3 = sched.every('2s', repeat=5).run(repeat42, 33)
-
-# task3.pause()
-
-# loop.run_until_complete(asyncio.sleep(16))
-# task3.resume()
-# loop.run_until_complete(sched.add_task(task2.run(repeat22, 666)))
-# sched.next_run()
 
 async def only_exception_task():
     raise Exception('Something is wrong!')
