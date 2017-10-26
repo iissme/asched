@@ -1,0 +1,11 @@
+.idea/
+*.cache
+*.pyc
+venv
+/.tox/
+/asched.egg-info/
+/build/
+/dist/
+/.eggs/
+.coverage
+/tests/logs/tests.log

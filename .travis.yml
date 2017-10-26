@@ -1,0 +1,49 @@
+language: python
+sudo: false
+cache: pip
+python:
+  - "3.6"
+
+branches:
+  only:
+  - master
+
+env:
+  matrix:
+    - MONGODB=3.4.6
+
+before_install:
+  - python --version
+  - uname -a
+  - lsb_release -a
+
+install:
+  - wget http://fastdl.mongodb.org/linux/mongodb-linux-x86_64-${MONGODB}.tgz
+  - tar xzf mongodb-linux-x86_64-${MONGODB}.tgz
+  - ${PWD}/mongodb-linux-x86_64-${MONGODB}/bin/mongod --version
+  - pip install tox
+  - pip install pymongo motor
+  - pip install coveralls
+  - pip install https://github.com/isanich/asyncio-mongo-reflection/archive/master.zip
+  - virtualenv --version
+  - easy_install --version
+  - pip --version
+  - tox --version
+
+before_script:
+  - mkdir ${PWD}/mongodb-linux-x86_64-${MONGODB}/data
+  - ${PWD}/mongodb-linux-x86_64-${MONGODB}/bin/mongod --dbpath ${PWD}/mongodb-linux-x86_64-${MONGODB}/data --logpath ${PWD}/mongodb-linux-x86_64-${MONGODB}/mongodb.log --fork
+  - sleep 15
+
+script:
+  - tox -e coveralls
+
+after_failure:
+  - more .tox/log/* | cat
+  - more .tox/*/log/* | cat
+
+after_success:
+  coveralls
+
+after_sript:
+  - pkill mongod
