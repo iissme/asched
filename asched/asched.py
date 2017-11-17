@@ -41,13 +41,13 @@ class DelayedTask:
             db_connector = instance._db_connector
 
             if 'hash' in instance.__dict__:  # after __init__
-                if instance._db_connector is not None and db_connector.is_connected:
+                if instance._db_connector is not None:
                     if self.name == '_coro':
                         sync_name = 'runs'
                         sync_value = instance._get_coro_desc(value)
 
-                    async_run = instance._loop.create_task
-                    instance.__dict__['_sync_prop_task'] = async_run(
+                    loop_ct = instance._loop.create_task
+                    instance.__dict__['_sync_prop_task'] = loop_ct(
                         db_connector._sync_prop(instance.hash, sync_name, sync_value))
 
             instance.__dict__[self.name] = value
@@ -193,12 +193,12 @@ class DelayedTask:
 
         return self
 
-    def run(self, coro, *args, **kwargs):
+    async def run(self, coro, *args, **kwargs):
         if asyncio.iscoroutinefunction(coro):
             self._coro = partial(coro, *args, **kwargs)
 
             # make sure we've set coro desc in db before new hash
-            self._loop.run_until_complete(self._sync_prop_task)
+            await asyncio.wait_for(self._sync_prop_task, timeout=None)
 
             str_task = re.sub(r'at .+>', '', repr(self))
             new_hash = hashlib.sha256(str_task.encode('utf-8')).hexdigest()[:10]
@@ -259,30 +259,20 @@ class DelayedTask:
 
 
 class MongoConnector(MongoDequeReflection):
-    @classmethod
-    def create(cls, db_name='tasks_db',
-               col_name='async_shed',
-               obj_ref=None,
-               key='sched_tasks',
-               *args, **kwargs):
 
-        self = cls.__new__(cls)
+    async def __ainit__(self, db_name='tasks_db', col_name='async_shed',
+                        obj_ref=None, key='sched_tasks', *args, **kwargs):
+
         client = motor.motor_asyncio.AsyncIOMotorClient(*args, **kwargs)
-        self.is_connected = False
-
         self.db = client[db_name]
         self.col = self.db[col_name]
 
         if obj_ref is None:
             obj_ref = {'array_id': 'tasks_queue'}
         self.obj_ref = obj_ref
-
         self.key = key
-        return self
 
-    async def connect(self, lst=list()):
-        await super().create(lst, self, dumps=self._dump_task)
-        self.is_connected = True
+        await super().__ainit__(dumps=self._dump_task)
         return self
 
     @staticmethod
@@ -310,23 +300,35 @@ class MongoConnector(MongoDequeReflection):
         await self.col.update_one(self.obj_ref, {'$pull': {f'{self.key}': h}})
 
 
+def asyncinit(cls):
+    __new__ = cls.__new__
+
+    async def init(obj, *args, **kwargs):
+        await obj.__ainit__(*args, **kwargs)
+        return obj
+
+    def new(cls, *args, **kwargs):
+        obj = __new__(cls)
+        coro = init(obj, *args, **kwargs)
+        return coro
+
+    cls.__new__ = new
+    return cls
+
+
+@asyncinit
 class AsyncShed:
 
     loop_resolution = 0.1
 
-    def __init__(self, loop=None, conector=None):
+    async def __ainit__(self, loop=None, conector=None):
         self.quenue_mutex = asyncio.Lock()
         self.loop = loop or asyncio.get_event_loop()
-        self._db_connector = conector
-
-        self._runc = lambda coro: loop.run_until_complete(coro)
-        if conector is None:
-            self.scheduled_tasks = deque()
-        else:
-            self.scheduled_tasks = self._runc(conector.connect())
-
+        self._db_connector = await conector if conector else None
+        self.scheduled_tasks = self._db_connector if conector else deque()
         self.cached_tasks = {}
-        self._runc(self._get_cached_tasks())
+
+        await self._get_cached_tasks()
 
     async def _get_cached_tasks(self):
         for task in list(self.scheduled_tasks):
@@ -338,14 +340,13 @@ class AsyncShed:
     def _check_hash(self):
         pass
 
-    async def _new_task(self, **kwargs):
-        async with self.quenue_mutex:
-            task = DelayedTask(self.loop, db_connector=self._db_connector, supervisor=self, **kwargs)
-            self.scheduled_tasks.append(task)
-            return task
+    def _new_task(self, **kwargs):
+        task = DelayedTask(self.loop, db_connector=self._db_connector, supervisor=self, **kwargs)
+        self.scheduled_tasks.append(task)
+        return task
 
     def once(self):
-        return self._runc(self._new_task())
+        return self._new_task()
 
     def every(self, interval=1, repeat=None, max_failures=None):
 
@@ -355,7 +356,7 @@ class AsyncShed:
         elif type(interval) is not int:
             raise ShedulerExeption('Wrong interval string format! ex.1mo1w1d1h1m1s!')
 
-        return self._runc(self._new_task(interval=interval, repeat=repeat, max_failures=max_failures))
+        return self._new_task(interval=interval, repeat=repeat, max_failures=max_failures)
 
     def next_task_scheduled(self):
         if not len(self.scheduled_tasks):
@@ -378,50 +379,48 @@ class AsyncShed:
             raise ShedulerExeption(f'{task} is not prepared!'
                                    f' Task should have coro, exec interval or fixed exec time!')
 
-        async with self.quenue_mutex:
-            task.done_times = 0
-            self.scheduled_tasks.append(task)
+        task.done_times = 0
+        self.scheduled_tasks.append(task)
 
         return task
 
-    async def run(self):
+    async def start(self):
 
         while True:
             await asyncio.sleep(self.loop_resolution)
-            async with self.quenue_mutex:
 
-                iter_tasks = list(self.scheduled_tasks)
-                for task in iter_tasks:
+            iter_tasks = list(self.scheduled_tasks)
+            for task in iter_tasks:
 
-                    if not task._coro or task.is_paused:
-                        continue
+                if not task._coro or task.is_paused:
+                    continue
 
-                    if self.cached_tasks and task.hash in self.cached_tasks.keys():
-                        self._set_task_from_cache(task)
+                if self.cached_tasks and task.hash in self.cached_tasks.keys():
+                    self._set_task_from_cache(task)
 
-                    if task.is_cancelled:
+                if task.is_cancelled:
+                    self.scheduled_tasks.remove(task)
+                    continue
+
+                if task._is_idle:
+                    log.debug('Scheduling task from main asched loop...')
+                    task._schedule()
+                    continue
+
+                if task.is_done:
+                    try:
+                        result = task.result
+                    except Exception as e:
+                        log.warning(f'Task failed:\n{task}\n', exc_info=e)
+                    else:
+                        log.info(f'Task finished with result: {result}\n{task} ')
+
+                    if task._should_be_reshedulled:
+                        log.debug('Rescheduling task from main asched loop...')
+                        task._reshedule()
+                    else:
+                        task._set_default_stats()
                         self.scheduled_tasks.remove(task)
-                        continue
-
-                    if task._is_idle:
-                        log.debug('Scheduling task from main asched loop...')
-                        task._schedule()
-                        continue
-
-                    if task.is_done:
-                        try:
-                            result = task.result
-                        except Exception as e:
-                            log.warning(f'Task failed:\n{task}\n', exc_info=e)
-                        else:
-                            log.info(f'Task finished with result: {result}\n{task} ')
-
-                        if task._should_be_reshedulled:
-                            log.debug('Rescheduling task from main asched loop...')
-                            task._reshedule()
-                        else:
-                            task._set_default_stats()
-                            self.scheduled_tasks.remove(task)
 
     def _set_task_from_cache(self, task):
         ct = self.cached_tasks.pop(task.hash)
