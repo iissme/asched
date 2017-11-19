@@ -345,8 +345,9 @@ class AsyncShed:
         self.scheduled_tasks.append(task)
         return task
 
-    def once(self):
-        return self._new_task()
+    def once(self, at=None):
+        task = self._new_task()
+        return task if not at else task.at(at)
 
     def every(self, interval=1, repeat=None, max_failures=None):
 

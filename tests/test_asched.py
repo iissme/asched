@@ -16,7 +16,7 @@ async def test_simple_task_without_sched(capfd):
 @async_test
 async def test_simple_task_sched(capfd):
     now = datetime.now()
-    task_1 = sched.once().at(now + timedelta(seconds=2))
+    task_1 = sched.once(at=now + timedelta(seconds=2))
     await task_1.run(simple_task_1, 'simple_task_datetime')
 
     task_2 = sched.once().at(f'{now.hour}:{now.minute}:{now.second+1}')
