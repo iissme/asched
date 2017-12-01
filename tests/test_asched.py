@@ -42,7 +42,22 @@ async def test_periodic_task(capfd):
 
 
 @async_test
+async def test_periodic_task_at(capfd):
+    now = datetime.now()
+    task = sched.every('1s', repeat=2, start_at=now + timedelta(seconds=2))
+    await task.run(periodic_task_1, 'periodic_task')
+
+    await asyncio.sleep(1.8)
+    assert task.done_times is 0
+
+    await asyncio.sleep(3)
+    out, err = capfd.readouterr()
+    assert out.count('periodic_task') == 2
+
+
+@async_test
 async def test_failing_task(capfd):
+    now = datetime.now()
     task = sched.every('1s', max_failures=2)
     await task.run(only_exception_task)
 

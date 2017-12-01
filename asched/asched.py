@@ -132,8 +132,12 @@ class DelayedTask:
 
         now = datetime.now()
         if self.interval:
-            self.next_run_at = now + timedelta(seconds=self.interval)
-        elif self.next_run_at < now:
+            if self.next_run_at and not self.done_times and not self.failed_times:
+                pass
+            else:
+                self.next_run_at = now + timedelta(seconds=self.interval)
+
+        if self.next_run_at < now:
             raise WrongTimeDataExeption('Passed date should be later then \'now\'!')
 
         delta = self.next_run_at - now
@@ -167,27 +171,14 @@ class DelayedTask:
 
     def at(self, sched_date):
 
-        if self.interval is not None:
-            raise DelayedTaskExeption('Intervals don\'t work with \'at\' method!')
-
         if type(sched_date) is str:
-            hh_mm_re = re.compile(r'^(?P<hours>\d{,2}):(?P<minutes>\d{,2}):(?P<seconds>\d{,2})$')
-            match = re.match(hh_mm_re, sched_date)
-            if match:
-                hour = int(match.group('hours').lstrip('0'))
-                minute = int(match.group('minutes').lstrip('0'))
-                second = int(match.group('seconds').lstrip('0'))
-                assert 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59
-                sched_date = datetime.combine(datetime.now(), time(hour, minute, second))
-            else:
-                raise WrongTimeDataExeption('hh:mm formated string is expected!')
-
+            sched_date = self._parse_datestr(sched_date)
         elif not isinstance(sched_date, datetime):
             raise WrongTimeDataExeption('Datetime or str instance is expected!')
 
         self.next_run_at = sched_date
 
-        # allow task self invoke (use without supervisor)
+        # allow task self invoke
         if self._coro:
             self._schedule()
 
@@ -237,6 +228,25 @@ class DelayedTask:
         return f'    {pre}Task {repeat_stats} {self._get_coro_desc(self._coro)}\n    {timestats}'
 
     @staticmethod
+    def _parse_datestr(dstr):
+        hh_mm_re = re.compile(r'^(?P<hours>\d{,2}):(?P<minutes>\d{,2}):(?P<seconds>\d{,2})$')
+        match = re.match(hh_mm_re, dstr)
+        if match:
+            hour = match.group('hours')
+            hour = int(hour.lstrip('0') if len(hour) == 2 else hour)
+
+            minute = match.group('minutes')
+            minute = int(minute.lstrip('0') if len(minute) == 2 else minute)
+
+            second = match.group('seconds')
+            second = int(second.lstrip('0') if len(second) == 2 else second)
+
+            assert 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59
+            return datetime.combine(datetime.now(), time(hour, minute, second))
+        else:
+            raise WrongTimeDataExeption('hh:mm:ss formated string is expected!')
+
+    @staticmethod
     def _get_coro_desc(coro):
         if hasattr(coro, '__name__'):
             coro_name = coro.__name__
@@ -273,7 +283,6 @@ class MongoConnector(MongoDequeReflection):
         self.key = key
 
         await super().__ainit__(dumps=self._dump_task)
-        return self
 
     @staticmethod
     def _dump_task(task):
@@ -301,14 +310,14 @@ class MongoConnector(MongoDequeReflection):
 
 
 def asyncinit(cls):
-    __new__ = cls.__new__
+    __cnew__ = cls.__new__
 
     async def init(obj, *args, **kwargs):
         await obj.__ainit__(*args, **kwargs)
         return obj
 
     def new(cls, *args, **kwargs):
-        obj = __new__(cls)
+        obj = __cnew__(cls)
         coro = init(obj, *args, **kwargs)
         return coro
 
@@ -349,15 +358,16 @@ class AsyncShed:
         task = self._new_task()
         return task if not at else task.at(at)
 
-    def every(self, interval=1, repeat=None, max_failures=None):
+    def every(self, interval=1, repeat=None,
+              max_failures=None, start_at=None):
 
         if type(interval) is str:
             interval = self._parse_interval_string(interval)
-
         elif type(interval) is not int:
             raise ShedulerExeption('Wrong interval string format! ex.1mo1w1d1h1m1s!')
 
-        return self._new_task(interval=interval, repeat=repeat, max_failures=max_failures)
+        task = self._new_task(interval=interval, repeat=repeat, max_failures=max_failures)
+        return task if not start_at else task.at(start_at)
 
     def next_task_scheduled(self):
         if not len(self.scheduled_tasks):
