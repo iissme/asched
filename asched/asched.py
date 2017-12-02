@@ -296,6 +296,7 @@ class MongoConnector(MongoDequeReflection):
     async def _sync_prop(self, inst_hash, name, value):
         ref = self.obj_ref.copy()
         ref.update({f'{self.key}': {'$elemMatch': {'hash': inst_hash}}})
+        await self.mongo_pending.join()
         await self.col.update_one(ref, {'$set': {f'{self.key}.$.{name}': value}})
 
     async def _mongo_remove(self, task):
@@ -328,9 +329,8 @@ def asyncinit(cls):
 @asyncinit
 class AsyncShed:
 
-    loop_resolution = 0.1
-
-    async def __ainit__(self, loop=None, conector=None):
+    async def __ainit__(self, loop=None, conector=None, loop_resolution=0.1):
+        self.loop_resolution = loop_resolution
         self.quenue_mutex = asyncio.Lock()
         self.loop = loop or asyncio.get_event_loop()
         self._db_connector = await conector if conector else None
