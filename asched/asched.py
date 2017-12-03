@@ -270,7 +270,7 @@ class DelayedTask:
 
 class MongoConnector(MongoDequeReflection):
 
-    async def __ainit__(self, db_name='tasks_db', col_name='async_shed',
+    async def __ainit__(self, db_name='tasks_db', col_name='async_sched',
                         obj_ref=None, key='sched_tasks', *args, **kwargs):
 
         client = motor.motor_asyncio.AsyncIOMotorClient(*args, **kwargs)
