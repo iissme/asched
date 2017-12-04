@@ -132,7 +132,9 @@ class DelayedTask:
 
         now = datetime.now()
         if self.interval:
-            if self.next_run_at and not self.done_times and not self.failed_times:
+            if self.next_run_at and not self.last_run_at:  # from cache
+                pass
+            elif self.next_run_at and not self.done_times and not self.failed_times:
                 pass
             else:
                 self.next_run_at = now + timedelta(seconds=self.interval)
@@ -442,8 +444,11 @@ class AsyncShed:
         task.done_times = ct['done_times']
         task.failed_times = ct['failed_times']
         task.last_run_at = ct.get('last_run_at', None)
-        if not task.interval and task.next_run_at < ct['next_run_at']:
-            task.next_run_at = ct['next_run_at']
+
+        ct_next_run = ct.get('next_run_at', None)
+        if ct_next_run:
+            if not task.next_run_at or task.next_run_at < ct_next_run:
+                task.next_run_at = ct['next_run_at']
 
     @staticmethod
     def _parse_interval_string(interval):
