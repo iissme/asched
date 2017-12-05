@@ -140,6 +140,7 @@ class DelayedTask:
                 self.next_run_at = now + timedelta(seconds=self.interval)
 
         if self.next_run_at < now:
+            self.cancel()
             raise WrongTimeDataExeption('Passed date should be later then \'now\'!')
 
         delta = self.next_run_at - now
