@@ -14,6 +14,22 @@ async def test_simple_task_without_sched(capfd):
 
 
 @async_test
+async def test_task_pause(capfd):
+    task = sched.every('1s', repeat=3)
+    await task.run(periodic_task_1, 'periodic_task')
+    await asyncio.sleep(1.5)
+
+    task.pause()
+    assert task.done_times == 1
+    await asyncio.sleep(1.5)
+
+    task.resume()
+    await asyncio.sleep(2.5)
+    out, err = capfd.readouterr()
+    assert out.count('periodic_task') == 3
+
+
+@async_test
 async def test_simple_task_sched(capfd):
     now = datetime.now()
     task_1 = sched.once(at=now + timedelta(seconds=2))
@@ -79,43 +95,32 @@ async def test_multiple_periodic_tasks(capfd):
     assert out.count('periodic_task_2') == 3
 
 
-@async_test
-async def test_task_pause(capfd):
-    task = sched.every('1s', repeat=3)
-    await task.run(periodic_task_1, 'periodic_task')
-    await asyncio.sleep(1.5)
-
-    task.pause()
-    assert task.done_times == 1
-    await asyncio.sleep(1.5)
-
-    task.resume()
-    await asyncio.sleep(2.5)
-    out, err = capfd.readouterr()
-    assert out.count('periodic_task') == 3
-
-
 sched = lrun_uc(AsyncShed(loop, conector=MongoConnector(db_name='test_db')))
-lrun_uc(sched._db_connector.col.remove())
-lrun_uc(asyncio.sleep(2))
+# lrun_uc(sched._db_connector.col.remove())
 loop.create_task(sched.start())
+
 
 async def only_exception_task():
     raise Exception('Something is wrong!')
+
 
 async def periodic_task_with_ex(i):
     if random.random() > 0.8:
         raise Exception('Periodic_task is broken')
     print(i)
 
+
 async def simple_task_1(i):
     print(i)
+
 
 async def simple_task_2(i):
     print(i)
 
+
 async def periodic_task_1(i):
     print(i)
+
 
 async def periodic_task_2(i):
     print(i)

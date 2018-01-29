@@ -1,10 +1,10 @@
 import asyncio
-import hashlib
 import logging
 import random
 import re
 from collections import deque
 from datetime import datetime, timedelta, time
+from hashlib import sha256
 from functools import partial
 
 import motor.motor_asyncio
@@ -46,8 +46,7 @@ class DelayedTask:
                         sync_name = 'runs'
                         sync_value = instance._get_coro_desc(value)
 
-                    loop_ct = instance._loop.create_task
-                    instance.__dict__['_sync_prop_task'] = loop_ct(
+                    instance.__dict__['_sync_prop_task'] = instance._loop.create_task(
                         db_connector._sync_prop(instance.hash, sync_name, sync_value))
 
             instance.__dict__[self.name] = value
@@ -79,8 +78,7 @@ class DelayedTask:
         self.max_failures = max_failures if max_failures else repeat
         self._set_default_stats()
 
-        task_hash = hashlib.sha1(str(hash(self)).encode('utf-8'))
-        self.hash = task_hash.hexdigest()[:10]
+        self.hash = sha256(str(hash(self)).encode('utf-8')).hexdigest()[:10]
 
     def _set_default_stats(self):
         self._should_be_reshedulled = True if self.interval else False
@@ -194,8 +192,7 @@ class DelayedTask:
             # make sure we've set coro desc in db before new hash
             await asyncio.wait_for(self._sync_prop_task, timeout=None)
 
-            str_task = re.sub(r'at .+>', '', repr(self))
-            new_hash = hashlib.sha256(str_task.encode('utf-8')).hexdigest()[:10]
+            new_hash = sha256(self.hash_str.encode('utf-8')).hexdigest()[:10]
 
             for task in self._task_supervisor.scheduled_tasks:
                 if new_hash == task.hash:
@@ -270,6 +267,13 @@ class DelayedTask:
     def is_done(self):
         return self._future.done()
 
+    @property
+    def hash_str(self):
+        task_info = f'{self.interval}{self.repeat}{self.max_failures}'
+        if self._coro:
+            task_info += re.sub(r'at .+>', '', self._get_coro_desc(self._coro))
+        return task_info
+
 
 class MongoConnector(MongoDequeReflection):
 
@@ -289,6 +293,9 @@ class MongoConnector(MongoDequeReflection):
 
     @staticmethod
     def _dump_task(task):
+        if not isinstance(task, DelayedTask):
+            return task
+
         cached_attrs = ('hash', 'repeat', 'interval', 'is_paused',
                         'next_run_at', 'last_run_at', 'done_times',
                         'failed_times')
@@ -349,6 +356,8 @@ class AsyncShed:
                 self.cached_tasks[ct.pop('hash')] = ct
                 self.scheduled_tasks.remove(task)
 
+        await self.scheduled_tasks.mongo_pending.join()
+
     def _check_hash(self):
         pass
 
@@ -406,11 +415,14 @@ class AsyncShed:
             iter_tasks = list(self.scheduled_tasks)
             for task in iter_tasks:
 
-                if not task._coro or task.is_paused:
+                if not task._coro:
                     continue
 
                 if self.cached_tasks and task.hash in self.cached_tasks.keys():
                     self._set_task_from_cache(task)
+
+                if task.is_paused:
+                    continue
 
                 if task.is_cancelled:
                     self.scheduled_tasks.remove(task)
