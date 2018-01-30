@@ -73,7 +73,6 @@ async def test_periodic_task_at(capfd):
 
 @async_test
 async def test_failing_task(capfd):
-    now = datetime.now()
     task = sched.every('1s', max_failures=2)
     await task.run(only_exception_task)
 

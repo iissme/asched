@@ -206,7 +206,16 @@ class DelayedTask:
             raise DelayedTaskExeption(f'Coroutine function is expected, but got {type(coro)}!')
 
     def __lt__(self, other):
-        return self.next_run_at < other.next_run_at
+        isdateself = isinstance(self.next_run_at, datetime)
+        isdateother = isinstance(other.next_run_at, datetime)
+        if isdateself and isdateother:
+            return self.next_run_at < other.next_run_at
+        elif isdateself and not isdateother:
+            return False
+        elif not isdateself and isdateother:
+            return True
+        else:
+            return False
 
     def __repr__(self):
         format_time = lambda t: t.strftime('%Y-%m-%d %H:%M:%S') if t else '[never]'
