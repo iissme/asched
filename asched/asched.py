@@ -162,11 +162,13 @@ class DelayedTask:
 
         self.is_paused = True
         self._future.cancel()
+        log.info(f'Task({self.hash}) is paused!')
 
     def resume(self):
         if not self.is_paused:
             raise DelayedTaskExeption('You can\'t resume task that is not paused!')
 
+        log.info(f'Task({self.hash}) resumed!')
         self.is_paused = False
         self._schedule()
 
@@ -187,12 +189,13 @@ class DelayedTask:
 
     async def run(self, coro, *args, **kwargs):
         if asyncio.iscoroutinefunction(coro):
+            self.is_paused = True
             self._coro = partial(coro, *args, **kwargs)
 
             # make sure we've set coro desc in db before new hash
             await asyncio.wait_for(self._sync_prop_task, timeout=None)
 
-            new_hash = sha256(self.hash_str.encode('utf-8')).hexdigest()[:10]
+            new_hash = sha256(self._hash_str.encode('utf-8')).hexdigest()[:10]
 
             for task in self._task_supervisor.scheduled_tasks:
                 if new_hash == task.hash:
@@ -200,6 +203,7 @@ class DelayedTask:
                     raise DelayedTaskExeption(f'Same task\'s already scheduled!')
 
             self.hash = new_hash
+            self.is_paused = False
 
             return self
         else:
@@ -234,7 +238,8 @@ class DelayedTask:
         elif self.is_paused:
             pre = 'Paused - '
 
-        return f'    {pre}Task {repeat_stats} {self._get_coro_desc(self._coro)}\n    {timestats}'
+        return f'    {pre}Task({self.hash}) {repeat_stats}' \
+               f' {self._get_coro_desc(self._coro)}\n    {timestats}'
 
     @staticmethod
     def _parse_datestr(dstr):
@@ -277,7 +282,7 @@ class DelayedTask:
         return self._future.done()
 
     @property
-    def hash_str(self):
+    def _hash_str(self):
         task_info = f'{self.interval}{self.repeat}{self.max_failures}'
         if self._coro:
             task_info += re.sub(r'at .+>', '', self._get_coro_desc(self._coro))
@@ -438,7 +443,7 @@ class AsyncShed:
                     continue
 
                 if task._is_idle:
-                    log.debug('Scheduling task from main asched loop...')
+                    log.debug(f'Scheduling task({task.hash}) from main asched loop...')
                     task._schedule()
                     continue
 
@@ -451,13 +456,15 @@ class AsyncShed:
                         log.info(f'Task finished with result: {result}\n{task} ')
 
                     if task._should_be_reshedulled:
-                        log.debug('Rescheduling task from main asched loop...')
+                        log.debug(f'Rescheduling task({task.hash}) from main asched loop...')
                         task._reshedule()
                     else:
                         task._set_default_stats()
                         self.scheduled_tasks.remove(task)
 
     def _set_task_from_cache(self, task):
+
+        log.info(f'Setting task({task.hash}) from cache...')
         ct = self.cached_tasks.pop(task.hash)
         if ct['done_times'] == task.repeat or ct['failed_times'] == task.max_failures:
             return
@@ -468,9 +475,11 @@ class AsyncShed:
         task.last_run_at = ct.get('last_run_at', None)
 
         ct_next_run = ct.get('next_run_at', None)
-        if ct_next_run:
-            if not task.next_run_at or task.next_run_at < ct_next_run:
-                task.next_run_at = ct['next_run_at']
+        if ct_next_run and ct_next_run > datetime.now():
+            if not task.next_run_at or task.next_run_at > ct_next_run:
+                task.next_run_at = ct_next_run
+
+        log.info(f'Task is set from cache:\n{task} ')
 
     @staticmethod
     def _parse_interval_string(interval):

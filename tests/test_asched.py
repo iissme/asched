@@ -35,7 +35,7 @@ async def test_simple_task_sched(capfd):
     task_1 = sched.once(at=now + timedelta(seconds=2))
     await task_1.run(simple_task_1, 'simple_task_datetime')
 
-    task_2 = sched.once().at(f'{now.hour}:{now.minute}:{now.second+1}')
+    task_2 = sched.once().at(f'{now.hour}:{now.minute}:{now.second+2}')
     await task_2.run(simple_task_2, 'simple_task_str')
 
     await asyncio.sleep(3.5)
@@ -63,7 +63,7 @@ async def test_periodic_task_at(capfd):
     task = sched.every('1s', repeat=2, start_at=now + timedelta(seconds=2))
     await task.run(periodic_task_1, 'periodic_task')
 
-    await asyncio.sleep(1.8)
+    await asyncio.sleep(1.5)
     assert task.done_times is 0
 
     await asyncio.sleep(3)

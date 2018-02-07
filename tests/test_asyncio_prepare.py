@@ -27,6 +27,9 @@ logging.basicConfig(level=logging.DEBUG,
                     filemode='w')
 
 
+log = logging.getLogger(__name__)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def test_shutdown():
     yield None
@@ -42,5 +45,8 @@ def test_shutdown():
 def async_test(testf):
     @wraps(testf)
     def tmp(*args, **kwargs):
-        return lrun_uc(testf(*args, **kwargs))
+        log.info(f'Starting test - {tmp.__name__}...')
+        res = lrun_uc(testf(*args, **kwargs))
+        log.info(f'Test - {tmp.__name__} is finished!')
+        return res
     return tmp
