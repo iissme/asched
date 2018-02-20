@@ -18,7 +18,7 @@ class DelayedTaskExeption(Exception):
     pass
 
 
-class WrongTimeDataExeption(Exception):
+class WrongTimeDataException(Exception):
     pass
 
 
@@ -139,7 +139,7 @@ class DelayedTask:
 
         if self.next_run_at < now:
             self.cancel()
-            raise WrongTimeDataExeption('Passed date should be later then \'now\'!')
+            raise WrongTimeDataException('Passed date should be later then \'now\'!')
 
         delta = self.next_run_at - now
         loop_correction = getattr(self._task_supervisor, 'loop_resolution', 0)
@@ -177,7 +177,7 @@ class DelayedTask:
         if type(sched_date) is str:
             sched_date = self._parse_datestr(sched_date)
         elif not isinstance(sched_date, datetime):
-            raise WrongTimeDataExeption('Datetime or str instance is expected!')
+            raise WrongTimeDataException('Datetime or str instance is expected!')
 
         self.next_run_at = sched_date
 
@@ -243,22 +243,23 @@ class DelayedTask:
 
     @staticmethod
     def _parse_datestr(dstr):
-        hh_mm_re = re.compile(r'^(?P<hours>\d{,2}):(?P<minutes>\d{,2}):(?P<seconds>\d{,2})$')
+        hh_mm_re = re.compile(r'^(?P<hours>\d{,2}):(?P<minutes>\d{,2})(:(?P<seconds>\d{,2}))?$')
         match = re.match(hh_mm_re, dstr)
         if match:
-            hour = match.group('hours')
-            hour = int(hour.lstrip('0') if len(hour) == 2 else hour)
+            get_int = lambda tstr: int(tstr[1:] if len(tstr) == 2 and tstr.startswith('0') else tstr)
+            hour = get_int(match.group('hours'))
+            minute = get_int(match.group('minutes'))
+            second = get_int(match.group('seconds') or '0')
 
-            minute = match.group('minutes')
-            minute = int(minute.lstrip('0') if len(minute) == 2 else minute)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+                raise WrongTimeDataException('Wrong time string value! Supposed is hh(0-23):mm(0-59):ss(0-59)')
 
-            second = match.group('seconds')
-            second = int(second.lstrip('0') if len(second) == 2 else second)
-
-            assert 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59
-            return datetime.combine(datetime.now(), time(hour, minute, second))
+            set_time = datetime.combine(datetime.now(), time(hour, minute, second))
+            if set_time < datetime.now():
+                set_time += timedelta(days=1)
+            return set_time
         else:
-            raise WrongTimeDataExeption('hh:mm:ss formated string is expected!')
+            raise WrongTimeDataException('hh:mm:ss formated string is expected!')
 
     @staticmethod
     def _get_coro_desc(coro):

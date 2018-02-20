@@ -7,6 +7,6 @@ Schedule your asyncio coroutines for a specific time or interval, keep their run
 """
 import logging
 from .asched import (AsyncShed, DelayedTask, MongoConnector,
-                     DelayedTaskExeption, WrongTimeDataExeption, ShedulerExeption)
+                     DelayedTaskExeption, WrongTimeDataException, ShedulerExeption)
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
