@@ -130,12 +130,14 @@ class DelayedTask:
 
         now = datetime.now()
         if self.interval:
-            if self.next_run_at and not self.last_run_at:  # from cache
-                pass
-            elif self.next_run_at and not self.done_times and not self.failed_times:
-                pass
+            delta = timedelta(seconds=self.interval)
+            if self.next_run_at and (not self.last_run_at
+                                     or (not self.done_times and not self.failed_times)):
+                pass  # from cache
+            elif self.last_run_at and (self.last_run_at + delta) > now:
+                self.next_run_at = self.last_run_at + delta
             else:
-                self.next_run_at = now + timedelta(seconds=self.interval)
+                self.next_run_at = now + delta
 
         if self.next_run_at < now:
             self.cancel()
