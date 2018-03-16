@@ -2,7 +2,7 @@
 asched
 ~~~~~~~~~~~~~~~~~~~
 Schedule your asyncio coroutines for a specific time or interval, keep their run stats and reschedule them from the last state when restarted.
-:copyright: (c) 2017 isanich
+:copyright: (c) 2018 isanich
 :license: MIT, see LICENSE for more details.
 """
 import logging
