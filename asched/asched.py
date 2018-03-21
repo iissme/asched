@@ -71,7 +71,7 @@ class DelayedTask:
         self._task_supervisor = supervisor
         self._sync_prop_task = None
         self._coro = coro
-        self._future = asyncio.Future()
+        self._future = asyncio.Future(loop=loop)
 
         self.repeat = repeat
         self.interval = interval
@@ -126,7 +126,7 @@ class DelayedTask:
         self._is_idle = False
 
         if self.is_done or self.is_cancelled:
-            self._future = asyncio.Future()
+            self._future = asyncio.Future(loop=self._loop)
 
         now = datetime.now()
         if self.interval:
