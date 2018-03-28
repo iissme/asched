@@ -1,18 +1,3 @@
-# asched
-[![Build Status](https://travis-ci.org/isanich/asched.svg?branch=master)](https://travis-ci.org/isanich/asched)
-[![Coverage Status](https://coveralls.io/repos/github/isanich/asched/badge.svg?branch=master)](https://coveralls.io/github/isanich/asched?branch=master)
-
-Python 3.6+
-
-asched can schedule your asyncio coroutines for a specific time or interval, keep their run stats and reschedule them from the last state when restarted.
-
-## Install
-Clone from git and install via setup.py.
-Or `pip install -U https://github.com/isanich/asched/archive/master.zip`.
-
-## Documentation
-Look at example below.
-```py
 import asyncio
 from functools import partial
 from datetime import datetime, timedelta
@@ -81,11 +66,3 @@ async def main():
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete(main())
-
-```
-
-## Dependencies
-asched currenly uses [asyncio-mongo-reflection][amr_link] (powered by [mongodb][mongodb_link]) to store data.
-
-[mongodb_link]: https://www.mongodb.com/
-[amr_link]: https://github.com/isanich/asyncio-mongo-reflection
