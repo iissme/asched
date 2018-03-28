@@ -6,7 +6,7 @@ Schedule your asyncio coroutines for a specific time or interval, keep their run
 :license: MIT, see LICENSE for more details.
 """
 import logging
-from .asched import (AsyncShed, DelayedTask, MongoConnector,
+from .asched import (AsyncSched, DelayedTask, MongoConnector,
                      DelayedTaskExeption, WrongTimeDataException, ShedulerExeption)
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())

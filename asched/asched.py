@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import weakref
 import re
 from collections import deque
 from datetime import datetime, timedelta, time
@@ -62,9 +63,13 @@ class DelayedTask:
     _coro = SyncProp('_coro')
 
     def __init__(self, loop, *,
-                 db_connector=None, coro=None,
-                 interval=None, repeat=None,
-                 max_failures=None, supervisor=None):
+                 db_connector=None,
+                 coro=None,
+                 interval=None,
+                 repeat=None,
+                 max_failures=None,
+                 exc_type=None,
+                 supervisor=None):
 
         self._loop = loop
         self._db_connector = db_connector
@@ -75,7 +80,8 @@ class DelayedTask:
 
         self.repeat = repeat
         self.interval = interval
-        self.max_failures = max_failures if max_failures else repeat
+        self.max_failures = max_failures
+        self.exc_type = exc_type if exc_type else Exception
         self._set_default_stats()
 
         self.hash = sha256(str(hash(self)).encode('utf-8')).hexdigest()[:10]
@@ -105,8 +111,9 @@ class DelayedTask:
                     res = await coro()
                 except Exception as e:
                     self.failed_times += 1
-                    if self.max_failures and self.failed_times == self.max_failures:
-                        self._should_be_reshedulled = False
+                    if isinstance(e, self.exc_type):
+                        if self.max_failures and self.failed_times == self.max_failures:
+                            self._should_be_reshedulled = False
 
                     future.set_exception(e)
                 else:
@@ -154,25 +161,28 @@ class DelayedTask:
         self.last_run_at = self.next_run_at
         self._schedule()
 
-    def cancel(self):
-        self._future.cancel()
-        self._set_default_stats()
+    async def cancel(self):
+        async with self._task_supervisor._iteration_mutex:
+            self._future.cancel()
+            self._should_be_reshedulled = False  # in case task is done before cancel
 
-    def pause(self):
-        if self.is_paused or self.is_cancelled:
-            raise DelayedTaskExeption('Only running tasks can be paused!')
+    async def pause(self):
+        async with self._task_supervisor._iteration_mutex:
+            if self.is_paused or self.is_cancelled:
+                raise DelayedTaskExeption('Only running tasks can be paused!')
 
-        self.is_paused = True
-        self._future.cancel()
-        log.info(f'Task({self.hash}) is paused!')
+            self.is_paused = True
+            self._future.cancel()
+            log.info(f'Task({self.hash}) is paused!')
 
-    def resume(self):
-        if not self.is_paused:
-            raise DelayedTaskExeption('You can\'t resume task that is not paused!')
+    async def resume(self):
+        async with self._task_supervisor._iteration_mutex:
+            if not self.is_paused:
+                raise DelayedTaskExeption('You can\'t resume task that is not paused!')
 
-        log.info(f'Task({self.hash}) resumed!')
-        self.is_paused = False
-        self._schedule()
+            log.info(f'Task({self.hash}) resumed!')
+            self.is_paused = False
+            self._schedule()
 
     def at(self, sched_date):
 
@@ -191,37 +201,23 @@ class DelayedTask:
 
     async def run(self, coro, *args, **kwargs):
         if asyncio.iscoroutinefunction(coro):
-            self.is_paused = True
-            self._coro = partial(coro, *args, **kwargs)
+            with await self._task_supervisor._iteration_mutex:
+                self._coro = partial(coro, *args, **kwargs)
+                # make sure we've set coro desc in db before new hash
+                await asyncio.wait_for(self._sync_prop_task, timeout=None)
 
-            # make sure we've set coro desc in db before new hash
-            await asyncio.wait_for(self._sync_prop_task, timeout=None)
+                new_hash = sha256(self._hash_str.encode('utf-8')).hexdigest()[:10]
 
-            new_hash = sha256(self._hash_str.encode('utf-8')).hexdigest()[:10]
+                for task in self._task_supervisor.scheduled_tasks:
+                    if new_hash == task.hash:
+                        self.cancel()
+                        raise DelayedTaskExeption(f'Same task\'s already scheduled!')
 
-            for task in self._task_supervisor.scheduled_tasks:
-                if new_hash == task.hash:
-                    self.cancel()
-                    raise DelayedTaskExeption(f'Same task\'s already scheduled!')
-
-            self.hash = new_hash
-            self.is_paused = False
+                self.hash = new_hash
 
             return self
         else:
             raise DelayedTaskExeption(f'Coroutine function is expected, but got {type(coro)}!')
-
-    def __lt__(self, other):
-        isdateself = isinstance(self.next_run_at, datetime)
-        isdateother = isinstance(other.next_run_at, datetime)
-        if isdateself and isdateother:
-            return self.next_run_at < other.next_run_at
-        elif isdateself and not isdateother:
-            return False
-        elif not isdateself and isdateother:
-            return True
-        else:
-            return False
 
     def __repr__(self):
         format_time = lambda t: t.strftime('%Y-%m-%d %H:%M:%S') if t else '[never]'
@@ -326,16 +322,6 @@ class MongoConnector(MongoDequeReflection):
         await self.mongo_pending.join()
         await self.col.update_one(ref, {'$set': {f'{self.key}.$.{name}': value}})
 
-    async def _mongo_remove(self, task):
-        task_hash = getattr(task, 'hash', None) or task['hash']
-        h = random.getrandbits(32)
-
-        ref = self.obj_ref.copy()
-        ref.update({f'{self.key}': {'$elemMatch': {'hash': task_hash}}})
-        await self.col.update_one(ref, {'$set': {f'{self.key}.$': h}})
-
-        await self.col.update_one(self.obj_ref, {'$pull': {f'{self.key}': h}})
-
 
 def asyncinit(cls):
     __cnew__ = cls.__new__
@@ -354,17 +340,20 @@ def asyncinit(cls):
 
 
 @asyncinit
-class AsyncShed:
+class AsyncSched:
 
     async def __ainit__(self, loop=None, conector=None, loop_resolution=0.1):
         self.loop_resolution = loop_resolution
-        self.quenue_mutex = asyncio.Lock()
+        self._iteration_mutex = asyncio.Lock()
         self.loop = loop or asyncio.get_event_loop()
         self._db_connector = await conector if conector else None
         self.scheduled_tasks = self._db_connector if conector else deque()
         self.cached_tasks = {}
 
         await self._get_cached_tasks()
+        self._loop_task = self.loop.create_task(self._scheduler_loop())
+        self._loop_task.add_done_callback(self._handle_loop_stop)
+        self._finalizer = weakref.finalize(self, self._cancel_loop_task)
 
     async def _get_cached_tasks(self):
         for task in list(self.scheduled_tasks):
@@ -375,9 +364,6 @@ class AsyncShed:
 
         await self.scheduled_tasks.mongo_pending.join()
 
-    def _check_hash(self):
-        pass
-
     def _new_task(self, **kwargs):
         task = DelayedTask(self.loop, db_connector=self._db_connector, supervisor=self, **kwargs)
         self.scheduled_tasks.append(task)
@@ -387,26 +373,38 @@ class AsyncShed:
         task = self._new_task()
         return task if not at else task.at(at)
 
-    def every(self, interval=1, repeat=None,
-              max_failures=None, start_at=None):
+    def every(self,
+              interval,
+              repeat=None,
+              max_failures=None,
+              exc_type=None,
+              start_at=None):
 
         if type(interval) is str:
             interval = self._parse_interval_string(interval)
         elif type(interval) is not int:
             raise ShedulerExeption('Wrong interval string format! ex.1mo1w1d1h1m1s!')
 
-        task = self._new_task(interval=interval, repeat=repeat, max_failures=max_failures)
+        if not max_failures and exc_type:
+            raise ShedulerExeption('max_failures argument is required with exc_type!')
+
+        task = self._new_task(interval=interval, repeat=repeat,
+                              max_failures=max_failures, exc_type=exc_type)
+
         return task if not start_at else task.at(start_at)
 
     def next_task_scheduled(self):
         if not len(self.scheduled_tasks):
             return None
-        try:
-            next_task = min(self.scheduled_tasks)
-        except TypeError:
-            raise ShedulerExeption('Some tasks haven\'t been sheduled yet! Please wait!')
-        else:
-            return next_task
+
+        def get_key(o):
+            key = getattr(o, 'next_run_at', None)
+            if not key:
+                key = datetime(year=9999, month=1, day=1)  # task not scheduled or not active
+            return key
+
+        next_task = min(self.scheduled_tasks, key=get_key)
+        return next_task
 
     async def add_task(self, task):
         if not isinstance(task, DelayedTask):
@@ -424,13 +422,31 @@ class AsyncShed:
 
         return task
 
-    async def start(self):
+    @staticmethod
+    def _handle_loop_stop(future):
+        try:
+            future.result()
+        except Exception as e:
+            trace = getattr(future, '_source_traceback', None)
+            full_trace = ''.join(trace.format()) if trace else 'Not available.'
+            log.error(f'Asched loop error!\nFull traceback:\n{full_trace}\n'
+                      f'Exc info:\n', exc_info=e)
+            raise
+
+    def _cancel_loop_task(self):
+        if not self.loop.is_closed():
+            self._loop_task.cancel()
+
+    async def _scheduler_loop(self):
 
         while True:
             await asyncio.sleep(self.loop_resolution)
+            if not len(self.scheduled_tasks):
+                continue
 
-            iter_tasks = list(self.scheduled_tasks)
-            for task in iter_tasks:
+            await self._iteration_mutex.acquire()
+
+            for task in self.scheduled_tasks:
 
                 if not task._coro:
                     continue
@@ -442,12 +458,13 @@ class AsyncShed:
                     continue
 
                 if task.is_cancelled:
-                    self.scheduled_tasks.remove(task)
+                    self.loop.call_soon(partial(self.scheduled_tasks.remove, task))
+                    task._set_default_stats()
                     continue
 
                 if task._is_idle:
                     log.debug(f'Scheduling task({task.hash}) from main asched loop...')
-                    task._schedule()
+                    self.loop.call_soon(task._schedule)
                     continue
 
                 if task.is_done:
@@ -460,10 +477,12 @@ class AsyncShed:
 
                     if task._should_be_reshedulled:
                         log.debug(f'Rescheduling task({task.hash}) from main asched loop...')
-                        task._reshedule()
+                        self.loop.call_soon(task._reshedule)
                     else:
                         task._set_default_stats()
-                        self.scheduled_tasks.remove(task)
+                        self.loop.call_soon(partial(self.scheduled_tasks.remove, task))
+
+            self._iteration_mutex.release()
 
     def _set_task_from_cache(self, task):
 

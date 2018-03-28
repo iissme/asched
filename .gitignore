@@ -8,4 +8,5 @@ venv
 /dist/
 /.eggs/
 .coverage
+*.pytest_cache/
 /tests/logs/tests.log

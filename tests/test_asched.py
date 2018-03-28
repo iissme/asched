@@ -58,6 +58,19 @@ async def test_periodic_task(capfd):
 
 
 @async_test
+async def test_periodic_readd(capfd):
+    task = sched.every('1s', repeat=1)
+    await task.run(periodic_task_1, 'periodic_task')
+
+    await asyncio.sleep(1.5)
+    await sched.add_task(task)
+
+    await asyncio.sleep(1.5)
+    out, err = capfd.readouterr()
+    assert out.count('periodic_task') == 2
+
+
+@async_test
 async def test_periodic_task_at(capfd):
     now = datetime.now()
     task = sched.every('1s', repeat=2, start_at=now + timedelta(seconds=2))
@@ -89,14 +102,14 @@ async def test_multiple_periodic_tasks(capfd):
     await task_2.run(periodic_task_2, 'periodic_task_2')
 
     await asyncio.sleep(4.5)
+
     out, err = capfd.readouterr()
     assert out.count('periodic_task_1') == 2
     assert out.count('periodic_task_2') == 3
 
 
-sched = lrun_uc(AsyncShed(loop, conector=MongoConnector(db_name='test_db')))
+sched = lrun_uc(AsyncSched(loop, conector=MongoConnector(db_name='test_db')))
 # lrun_uc(sched._db_connector.col.remove())
-loop.create_task(sched.start())
 
 
 async def only_exception_task():
