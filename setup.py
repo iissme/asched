@@ -1,6 +1,4 @@
 from setuptools import setup
-from asched.__version__ import *
-import re
 import os
 
 root = os.path.dirname(os.path.abspath(__file__))
