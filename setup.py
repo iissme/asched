@@ -24,7 +24,7 @@ setup(name=about['__title__'],
       description='asched can schedule your asyncio coroutines for a specific time or interval,'
                   ' keep their run stats and reschedule them from the last state when restarted.',
       long_description=readme,
-      dependency_links=['git+https://github.com/isanich/asyncio-mongo-reflection/.git@master'
+      dependency_links=['git+https://github.com/iissme/asyncio-mongo-reflection/.git@master'
                         '#egg=asyncio-mongo-reflection-0.0.1'],
       packages=['asched'],
       setup_requires=['pytest-runner'],
