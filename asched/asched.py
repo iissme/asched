@@ -201,7 +201,7 @@ class DelayedTask:
 
     async def run(self, coro, *args, **kwargs):
         if asyncio.iscoroutinefunction(coro):
-            with await self._task_supervisor._iteration_mutex:
+            async with self._task_supervisor._iteration_mutex:
                 self._coro = partial(coro, *args, **kwargs)
                 # make sure we've set coro desc in db before new hash
                 await asyncio.wait_for(self._sync_prop_task, timeout=None)
